@@ -8,11 +8,8 @@
     <script src="/socket.io/socket.io.js"></script>
     <script>
         var socket = io();
-        socket.on('beat', function(data) {
-            $("body")
-                .css({backgroundColor: '#f00'})
-                .animate({backgroundColor: '#fff'}, 120);
-            console.log(data.beat);
+        socket.on('link-update', function(data) {
+            console.log(data);
         });
     </script>
 </body>
