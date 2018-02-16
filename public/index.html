@@ -7,10 +7,104 @@
     <script src="http://code.jquery.com/color/jquery.color-2.1.2.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        var socket = io();
-        socket.on('link-update', function(data) {
-            console.log(data);
-        });
+var bpmUtilities = {
+  bpmToMsPerBeat: function(bpm) {
+     return (60 / bpm) * 1000;
+  },
+
+  msToBeats: function(bpm, ms) {
+     return (ms / 1000) / (60 / bpm);
+  },
+
+  beatsToMs: function(bpm, beats) {
+     return beats * (60 / bpm) * 1000;
+  },
+  beatsToSeconds: function(bpm, beats) {
+     return beats * (60 / bpm);
+  },
+
+  valueInWrappedBeatRange(value, renderStart, renderEnd, wrapDuration) {
+      // standard case, end is after start
+      var inRange = (
+         (value >= renderStart) && 
+         (value < renderEnd)
+      );
+      // loop case, end is before start because of loop
+      if ((renderEnd < renderStart) && !inRange) {
+         inRange = (
+            ( (value >= 0) && (value < renderEnd) ) ||
+            ( (value >= renderStart) && (value < wrapDuration) )
+         );
+      }
+      return inRange;
+   }
+};
+
+const renderInterval = 60; // hard coded to match update interval on server (link.startUpdate()) 
+var renderOverlap = renderInterval * 0.2;
+const recycleBeats = 8;
+var state = {
+   isPlaying: false,
+   lastRenderEndBeat: -1,
+   lastRenderEndTime: 0,
+   intervalId: null
+};
+var updateTransport = function(linkBeat, linkBpm) {
+   // console.log('render at ' + window.performance.now() + ' last finished at ' + state.lastRenderEndTime);
+
+
+   let appState = state;
+
+   if (state.lastRenderEndBeat < 0)
+      state.lastRenderEndBeat = linkBeat;
+
+   var now = window.performance.now();
+   var renderStart = state.lastRenderEndTime;
+   var renderEnd = now + renderInterval + renderOverlap;
+   var chunkMs = renderEnd - renderStart;
+   if (chunkMs <= 0)
+      return;
+
+   var renderRange = {
+      start: {
+         time: renderStart,
+         beat: state.lastRenderEndBeat
+      },
+      end: {
+         time: renderEnd,
+         beat: state.lastRenderEndBeat + 
+            bpmUtilities.msToBeats(linkBpm, chunkMs)
+      }
+  };
+
+   // console.log(renderRange);
+   if (bpmUtilities.valueInWrappedBeatRange(0, 
+      renderRange.start.beat % recycleBeats, 
+      renderRange.end.beat % recycleBeats, 
+      recycleBeats)) {
+      console.log('bam', renderRange.start.beat);
+   }
+
+   // how do we sync ... ?
+   // linkBeat is what the beat was at the moment the server calls back
+   // we render things in chunks which deliberately overlap the update rate, so we can deal with jittery update callbacks
+   // which means, we usually render a chunk of time which starts some time after the linkBeat
+   // we also have to ensure that we render all the time – if we get ahead/behind we need to stretch time
+   // so our start beat will always be where we left off last time
+   // and our end beat will need to be our best guess based on linkBeat
+   // possibly we just assume whatever tempo is needed in that time period, i.e. each chunk has a different effective tempo
+   // todo!
+
+   // update state
+   state.lastRenderEndBeat = renderRange.end.beat;
+   state.lastRenderEndTime = state.lastRenderEndTime + chunkMs;
+}
+
+var socket = io();
+socket.on('link-update', function(data) {
+    // console.log(data);
+    updateTransport(data.beat, data.bpm);
+});
     </script>
 </body>
 </html>
