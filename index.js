@@ -13,13 +13,8 @@ const abletonlink = require('abletonlink');
 const link = new abletonlink();
 
 (() => {
-    let lastBeat = 0.0;
     link.startUpdate(60, (beat, phase, bpm) => {
-        beat = 0 ^ beat;
-        if(0 < beat - lastBeat) {
-            io.emit('beat', { beat });
-            lastBeat = beat;
-        }
+        io.emit('link-update', { beat, phase, bpm });
     });
 })();
 
