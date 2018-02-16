@@ -1,8 +1,11 @@
 const path = require('path');
+const express = require('express');
+const http = require('http');
 
-const app = require('express')();
-const server = require('http').createServer(app);
+const app = express();
+const server = http.createServer(app);
 const io = require('socket.io')(server);
+
 
 io.on('connection', function(client){
     client.on('event', function(data){});
@@ -18,9 +21,7 @@ const link = new abletonlink();
     });
 })();
 
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, "public", "index.html"));
-});
+app.use(express.static('public'));
 
 server.listen(3000, () => {
     console.log("**** listen on localhost:3000 ****");

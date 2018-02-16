@@ -7,6 +7,110 @@
     <script src="http://code.jquery.com/color/jquery.color-2.1.2.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script>
+
+
+function getSample (url, audioContext, cb) {
+   var request = new XMLHttpRequest();
+   request.open('GET', url);
+   request.responseType = 'arraybuffer';
+   request.onload = function () {
+      audioContext.decodeAudioData(request.response, cb);
+   };
+   request.send();
+}
+
+class HitCell {
+   constructor(options) {
+      this._isPlaying = false;
+      this.player = null;
+      this.fileUrl = options.fileUrl;
+      this.audioContext = options.audioContext;
+
+      this.loaded = new Promise((resolve, reject) => {      
+         getSample(this.fileUrl, this.audioContext, (buffer) => {
+            this.buffer = buffer;
+            resolve();
+         });
+      });
+   }
+
+   isPlaying() { return this._isPlaying };
+
+   playAt({ time, transportBpm, offsetMs, loopBeats }, { motion, motionLength, gain, auxSend }) {
+      if (!time) time = this.audioContext.currentTime;
+      if (!offsetMs) offsetMs = 0;
+      if (!loopBeats) loopBeats = 16;
+      if (!motion) motion = '';
+      if (!gain) gain = 1.0;
+
+      if (this.player) this.stopAt({ time, transportBpm });
+
+      let maxGain = 1.0;
+      let minGain = 0.01; // exponential ramps can't do 0 or negative
+      const minFilter = 40; // I should be conservative with this so I don't kill sub
+      const maxFilter = 15000;
+
+      let rate = 1.0;
+      let maxDuration = this.buffer.duration;
+      let endTime = time+maxDuration;
+
+      this.player = this.audioContext.createBufferSource();
+      this.player.buffer = this.buffer;
+      
+      this.player.playbackRate.value = rate;
+      
+      this.player.loop = false;
+
+      this.clickFilter = this.audioContext.createBiquadFilter();
+      this.clickFilter.type = 'lowpass';
+      this.clickFilter.frequency.value = maxFilter - 800;
+      this.clickFilter.Q.value = 0.8;
+
+      // little envelope
+      let envelope = {
+         attack: 0.01,
+         release: 0.1,
+      };
+      this.faderGain = this.audioContext.createGain();
+      this.faderGain.gain.setValueAtTime(minGain, time);
+      this.faderGain.gain.exponentialRampToValueAtTime(maxGain, time+envelope.attack);
+      this.faderGain.gain.exponentialRampToValueAtTime(maxGain, endTime-envelope.release);
+      this.faderGain.gain.exponentialRampToValueAtTime(minGain, endTime);
+
+      this.finalGain = this.audioContext.createGain();
+      this.finalGain.gain.value = gain * 0.9;
+
+      this.player.connect(this.faderGain);
+      this.faderGain.connect(this.finalGain);
+
+      this.finalGain.connect(this.clickFilter);
+      this.clickFilter.connect(this.audioContext.destination);
+      if (auxSend) {
+         this.clickFilter.connect(auxSend);
+      }
+
+      this.player.start(time);
+      this._isPlaying = true;
+
+      this.player.onended = () => {
+         this._isPlaying = false;
+      }
+
+      // experimental "fire and forget"
+      this.stopAt({ 
+         time: endTime
+      });
+   }
+
+   stopAt(options) {
+      let time = (options && options.time) || 0;
+      if (this.player) 
+         this.player.stop(time);
+      this.player = null;
+   }
+};
+
+
 var bpmUtilities = {
   bpmToMsPerBeat: function(bpm) {
      return (60 / bpm) * 1000;
@@ -40,9 +144,18 @@ var bpmUtilities = {
    }
 };
 
+let AudioContext = window.AudioContext || window.webkitAudioContext;
+var audioContext = new AudioContext();
+
+const clickSample = new HitCell({
+  fileUrl: '/assets/cuttingcard-likeso-rec-20151107-14-scissor-click.m4a',
+  audioContext: audioContext
+});
+
+
 const renderInterval = 60; // hard coded to match update interval on server (link.startUpdate()) 
 var renderOverlap = renderInterval * 0.2;
-const recycleBeats = 8;
+const recycleBeats = 1;
 var state = {
    isPlaying: false,
    lastRenderEndBeat: -1,
@@ -76,14 +189,21 @@ var updateTransport = function(linkBeat, linkBpm) {
             bpmUtilities.msToBeats(linkBpm, chunkMs)
       }
   };
+  let eventBeat = 0; // our thing happens on 0 % recycleBeats
+  let beatOffset = eventBeat - renderRange.start.beat;
+  var offsetMs = bpmUtilities.beatsToMs(linkBpm, beatOffset);
+  var timestamp = (renderRange.start.time + offsetMs) / 1000;
 
-   // console.log(renderRange);
-   if (bpmUtilities.valueInWrappedBeatRange(0, 
-      renderRange.start.beat % recycleBeats, 
-      renderRange.end.beat % recycleBeats, 
-      recycleBeats)) {
-      console.log('bam', renderRange.start.beat);
-   }
+  // console.log(renderRange);
+  if (bpmUtilities.valueInWrappedBeatRange(0, 
+    renderRange.start.beat % recycleBeats, 
+    renderRange.end.beat % recycleBeats, 
+    recycleBeats)) {
+    console.log('bam', renderRange.start.beat);
+    clickSample.playAt({
+      offsetMs: timestamp
+    }, {});
+  }
 
    // how do we sync ... ?
    // linkBeat is what the beat was at the moment the server calls back
